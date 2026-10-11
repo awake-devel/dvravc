@@ -7,3 +7,4 @@
 *.ulaw
 *.png
 /.claude/
+!/docs/*.png

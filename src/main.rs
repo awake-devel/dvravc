@@ -35,8 +35,8 @@ enum Cmd {
     Info { file: PathBuf },
     /// Terminal UI listing the .avc files in DIR (default: current dir).
     Tui { dir: Option<PathBuf> },
-    /// Graphical UI.
-    Gui,
+    /// Graphical UI, optionally with FILES (or folders) already added.
+    Gui { files: Vec<PathBuf> },
 }
 
 fn main() -> Result<()> {
@@ -73,7 +73,7 @@ fn main() -> Result<()> {
         }
         Cmd::Info { file } => info(&file),
         Cmd::Tui { dir } => tui::run(dir.unwrap_or_else(|| PathBuf::from("."))),
-        Cmd::Gui => gui::run(),
+        Cmd::Gui { files } => gui::run(files),
     }
 }
 

@@ -115,19 +115,35 @@ dvravc tui /media/usb   # or in another directory
 | `m`            | Toggle mosaic output                            |
 | `o`            | Edit the output directory (Enter to confirm, Esc to cancel) |
 | `Enter`        | Convert the selected files (or the current one) |
+| `x`            | Cancel a running conversion                     |
 | `r`            | Rescan the directory                            |
 | `q` / `Esc` / `Ctrl+C` | Quit (stops a running conversion and removes its partial file) |
 
-Conversion runs in the background; progress appears in the log pane.
+Conversion runs in the background: each file shows its status, a gauge shows
+overall progress and the log pane shows details. Press `x` to cancel.
 
 ### `gui`
 
 ```sh
 dvravc gui
+dvravc gui a.avc /media/usb/DVR/   # start with files or folders already added
 ```
 
-Add files with **Add files…** or drag and drop `.avc` files (or folders) onto
-the window, pick an output folder, choose the outputs and press **Convert**.
+![dvravc GUI](docs/gui.png)
+
+Click the drop zone to browse, or drag `.avc` files (or folders) onto the
+window. Each recording shows its start time, length, cameras and size, read
+from the file. Pick the outputs and press **Convert**. Each file shows its own
+progress and result, and **Open output folder** shows the MP4s when it's done.
+By default the output goes to an `output` folder next to the first recording.
+Closing the window or pressing **Cancel** stops ffmpeg and removes the
+partial file. The GUI follows the system light/dark theme; the button in the
+top-right corner switches between system, dark and light.
+
+On a Linux **Wayland** session, drag and drop isn't available (winit, the
+windowing library, doesn't implement it there yet), so use the file dialog,
+pass files on the command line, or run the GUI through XWayland with
+`WAYLAND_DISPLAY= dvravc gui`.
 
 ## Output layout
 
