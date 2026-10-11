@@ -1,0 +1,18 @@
+[package]
+name = "dvravc"
+version = "0.1.0"
+edition = "2024"
+description = "Convert 4-channel DVR .avc surveillance recordings to MP4 (CLI/TUI/GUI)"
+license = "MIT"
+repository = "https://github.com/awake-devel/dvravc"
+readme = "README.md"
+keywords = ["dvr", "cctv", "h264", "ffmpeg", "converter"]
+categories = ["command-line-utilities", "multimedia::video"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+eframe = "0.31"
+ratatui = "0.29"
+rfd = "0.15"
+tempfile = "3"

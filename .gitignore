@@ -1,0 +1,8 @@
+/target
+/output
+*.avc
+*.idx
+*.mp4
+*.h264
+*.ulaw
+*.png
