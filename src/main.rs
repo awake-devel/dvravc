@@ -20,7 +20,8 @@ enum Cmd {
     Convert {
         #[arg(required = true)]
         inputs: Vec<PathBuf>,
-        /// Output root; each recording gets its own subfolder.
+        /// Output root; each recording gets its own subfolder. Existing MP4s
+        /// with the same names are overwritten.
         #[arg(short, long, default_value = "output")]
         output: PathBuf,
         /// Don't write one MP4 per channel.
@@ -53,8 +54,14 @@ fn main() -> Result<()> {
                 bail!("no .avc files found");
             }
             let mut failed = 0;
-            for f in &files {
-                if let Err(e) = convert::convert(f, &output, &opts, &mut |s| println!("{s}")) {
+            let dirs = convert::output_dirs(&files, &output);
+            for (f, dir) in files.iter().zip(&dirs) {
+                let mut report = |e: convert::Event| {
+                    if let convert::Event::Log(s) = e {
+                        println!("{s}")
+                    }
+                };
+                if let Err(e) = convert::convert_to(f, dir, &opts, &convert::Cancel::default(), &mut report) {
                     eprintln!("error: {}: {e:#}", f.display());
                     failed += 1;
                 }
@@ -72,12 +79,13 @@ fn main() -> Result<()> {
 
 fn info(file: &std::path::Path) -> Result<()> {
     let rec = Recording::open(file)?;
-    println!("File:     {}", file.display());
+    println!("File:        {}", file.display());
     let fmt = |t: Option<dvravc::demux::DvrTime>| t.map_or("?".into(), |t| t.to_string());
-    println!("Start:    {}", fmt(rec.start));
-    println!("End:      {}", fmt(rec.end));
-    println!("Duration: {:.1}s (from frame timestamps)", rec.duration());
-    println!("Audio:    {} block(s) of G.711 mu-law 8 kHz", rec.audio.len());
+    println!("Created:     {}", fmt(rec.created));
+    println!("First frame: {}", fmt(rec.first_frame));
+    println!("Last frame:  {} (estimated from frame timestamps)", fmt(rec.last_frame()));
+    println!("Duration:    {:.1}s (video, from frame timestamps)", rec.duration());
+    println!("Audio:       {} block(s) of G.711 mu-law 8 kHz", rec.audio.len());
     for (&ch, frames) in &rec.video {
         let (w, h) = rec.sizes.get(&ch).copied().unwrap_or_default();
         println!(

@@ -15,7 +15,7 @@ uses `ffmpeg` to produce normal MP4s.
 - **One MP4 per camera channel**, named after the channel title stored in the file (e.g. `CH1_FRONTDOOR.mp4`).
 - **2x2 mosaic** of all channels, aligned on the recording start and labelled with each camera's title.
 - **Audio**: the G.711 μ-law track is muxed in as AAC, offset to match each channel's start.
-- **Batch**: pass several files or whole folders; every `*.avc` inside is converted.
+- **Batch**: pass several files or whole folders; every `*.avc` directly inside a folder is converted (not recursive).
 - Runs on Linux, macOS and Windows.
 
 ## Requirements
@@ -77,15 +77,22 @@ dvravc convert recording.avc --no-mosaic        # only per-channel files
 dvravc convert recording.avc --no-channels      # only the mosaic
 ```
 
+Existing MP4s with the same names in the output folder are overwritten. If two
+inputs share a file name (e.g. `a/rec.avc` and `b/rec.avc`), the second one
+goes to `rec_2/` instead of overwriting the first. When one output fails
+(e.g. one channel), the others are still written and the exit status is
+non-zero.
+
 ### `info`
 
 ```text
 $ dvravc info 20240101120000_SITE.avc
-File:     20240101120000_SITE.avc
-Start:    2024-01-01 11:59:47.120
-End:      2024-01-01 12:00:00.004
-Duration: 44.6s (from frame timestamps)
-Audio:    352 block(s) of G.711 mu-law 8 kHz
+File:        20240101120000_SITE.avc
+Created:     2024-01-01 11:59:47.120
+First frame: 2024-01-01 12:00:00.004
+Last frame:  2024-01-01 12:00:44.666 (estimated from frame timestamps)
+Duration:    44.6s (video, from frame timestamps)
+Audio:       352 block(s) of G.711 mu-law 8 kHz
 CH1 FRONTDOOR    352x288    140 frames   3.12 fps  starts +0.0s
 CH2 GARDEN       352x288    141 frames   3.22 fps  starts +0.9s
 CH3 DRIVEWAY     352x288    113 frames   3.18 fps  starts +4.4s
@@ -109,7 +116,7 @@ dvravc tui /media/usb   # or in another directory
 | `o`            | Edit the output directory (Enter to confirm, Esc to cancel) |
 | `Enter`        | Convert the selected files (or the current one) |
 | `r`            | Rescan the directory                            |
-| `q` / `Esc`    | Quit                                            |
+| `q` / `Esc` / `Ctrl+C` | Quit (stops a running conversion and removes its partial file) |
 
 Conversion runs in the background; progress appears in the log pane.
 
@@ -146,8 +153,8 @@ Reverse-engineered from real recordings; all integers are little-endian.
 | Offset | Type            | Meaning                                            |
 |--------|-----------------|----------------------------------------------------|
 | 0x00   | `"VA"`          | magic                                              |
-| 0x08   | 8 × u16         | Windows `SYSTEMTIME` (year, month, day-of-week, day, hour, min, sec, ms): recording start |
-| 0x18   | 8 × u16         | second `SYSTEMTIME`, probably the end              |
+| 0x08   | 8 × u16         | Windows `SYSTEMTIME` (year, month, day-of-week, day, hour, min, sec, ms): probably file creation / trigger time |
+| 0x18   | 8 × u16         | second `SYSTEMTIME`: wall-clock time of the first frame (it matches the first `.idx` entry) |
 | …      | text            | `CHn.Title=NAME\n` lines, one per camera           |
 
 **Frame records** follow the header. Each starts with a 4-byte marker:
@@ -167,8 +174,27 @@ Reverse-engineered from real recordings; all integers are little-endian.
 | +62    | …      | audio payload: G.711 μ-law, 8 kHz mono (usually 1024 bytes) |
 
 The next record starts right after the payload. If the bytes at the expected
-position are not a valid marker, the parser resynchronises on the next
-`01 e0`; a truncated final record is ignored.
+position are not a valid marker, or a record's size runs past the end of the
+file, the parser resynchronises on the next `01 e0`; a truncated final record
+is ignored.
+
+The header has no end time. `dvravc info` estimates it as the first-frame time
+plus the span of the record timestamps. The timestamps come from a millisecond
+counter (apparently time since the DVR booted) that drifts a few tenths of a
+second per minute against the wall clock, and wraps every 49.7 days; the parser
+unwraps it.
+
+**`.idx` sidecar** (optional, `dvravc` doesn't need it)
+
+A 4-byte header (zeros), then 36-byte records, then 32 trailing bytes:
+
+| Offset | Type   | Meaning                                                   |
+|--------|--------|-----------------------------------------------------------|
+| +0     | u32    | index, starting at 1                                      |
+| +4     | u32    | absolute offset of a record (`ff 3d/bd 01 e0`) in the `.avc` |
+| +8     | u32    | type: `0x1001` video keyframe (payload starts with SPS), `0x1002` video P-frame, `0x8001` audio |
+| +12    | 16 B   | `SYSTEMTIME`: wall-clock time of the record               |
+| +28    | 8 B    | byte 2: channel; byte 1: mostly 1, meaning unknown        |
 
 ## Compatible devices
 
@@ -196,7 +222,7 @@ source documents their internal layout, so they may be a different format:
 **How to recognise the format:**
 
 - Files come in pairs: `YYYYMMDDHHMMSS_<NAME>.avc` plus an `.idx` file with the
-  same base name. Records in the `.idx` are 0x24 bytes each.
+  same base name. Records in the `.idx` are 0x24 bytes each (see above).
 - The file starts with ASCII `VA`, and `CH1.Title=` … `CH4.Title=` lines
   appear near the top.
 - Frame markers `ff 3d 01 e0` (video) and `ff bd 01 e0` (audio) follow.

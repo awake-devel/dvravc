@@ -1,10 +1,10 @@
 //! Graphical UI (eframe/egui + rfd file dialogs).
 
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::TryRecvError;
 
 use anyhow::Result;
-use dvravc::convert::{self, Msg, Options};
+use dvravc::convert::{self, Batch, Msg, Options};
 use eframe::egui;
 
 pub fn run() -> Result<()> {
@@ -23,7 +23,7 @@ struct App {
     out_dir: PathBuf,
     opts: Options,
     log: Vec<String>,
-    worker: Option<Receiver<Msg>>,
+    worker: Option<Batch>,
     ffmpeg: bool,
 }
 
@@ -46,12 +46,20 @@ impl App {
     }
 
     fn poll_worker(&mut self) {
-        let Some(rx) = &self.worker else { return };
-        while let Ok(msg) = rx.try_recv() {
-            match msg {
-                Msg::Log(s) => self.log.push(s),
-                Msg::Finished { ok, failed } => {
+        let Some(b) = &self.worker else { return };
+        loop {
+            match b.rx.try_recv() {
+                Ok(Msg::Log(s)) => self.log.push(s),
+                Ok(Msg::Finished { ok, failed }) => {
                     self.log.push(format!("Done: {ok} ok, {failed} failed"));
+                    self.worker = None;
+                    return;
+                }
+                Ok(_) => {}
+                Err(TryRecvError::Empty) => return,
+                // The worker died without saying so: don't stay "busy" forever.
+                Err(TryRecvError::Disconnected) => {
+                    self.log.push("Conversion stopped unexpectedly".into());
                     self.worker = None;
                     return;
                 }

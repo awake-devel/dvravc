@@ -1,12 +1,12 @@
 //! Terminal UI (ratatui).
 
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
 use anyhow::Result;
-use dvravc::convert::{self, Msg, Options};
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use dvravc::convert::{self, Batch, Msg, Options};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::Line;
@@ -25,7 +25,7 @@ struct App {
     /// `Some(buffer)` while editing the output dir.
     editing: Option<String>,
     log: Vec<String>,
-    worker: Option<Receiver<Msg>>,
+    worker: Option<Batch>,
     tick: usize,
     ffmpeg: bool,
 }
@@ -48,8 +48,10 @@ pub fn run(dir: PathBuf) -> Result<()> {
     if !app.ffmpeg {
         app.log.extend(convert::FFMPEG_HINT.lines().map(String::from));
     }
+    // ratatui::init also installs a panic hook that restores the terminal.
     let mut terminal = ratatui::init();
     let res = app.main_loop(&mut terminal);
+    app.stop_worker();
     ratatui::restore();
     res
 }
@@ -95,6 +97,10 @@ impl App {
                     _ => {}
                 }
                 continue;
+            }
+            // Raw mode swallows SIGINT, so handle Ctrl+C as quit.
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                return Ok(());
             }
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
@@ -142,14 +148,34 @@ impl App {
     }
 
     fn poll_worker(&mut self) {
-        let Some(rx) = &self.worker else { return };
-        while let Ok(msg) = rx.try_recv() {
-            match msg {
-                Msg::Log(s) => self.log.extend(s.lines().map(String::from)),
-                Msg::Finished { ok, failed } => {
+        let Some(b) = &self.worker else { return };
+        loop {
+            match b.rx.try_recv() {
+                Ok(Msg::Log(s)) => self.log.extend(s.lines().map(String::from)),
+                Ok(Msg::Finished { ok, failed }) => {
                     self.log.push(format!("Done: {ok} ok, {failed} failed"));
                     self.worker = None;
                     return;
+                }
+                Ok(_) => {}
+                Err(TryRecvError::Empty) => return,
+                // The worker died without saying so: don't stay "busy" forever.
+                Err(TryRecvError::Disconnected) => {
+                    self.log.push("Conversion stopped unexpectedly".into());
+                    self.worker = None;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Stop a running batch (kills ffmpeg, removes the partial file) and wait for it.
+    fn stop_worker(&mut self) {
+        if let Some(b) = self.worker.take() {
+            b.cancel.cancel();
+            while let Ok(msg) = b.rx.recv_timeout(Duration::from_secs(5)) {
+                if matches!(msg, Msg::Finished { .. }) {
+                    break;
                 }
             }
         }
@@ -196,12 +222,18 @@ impl App {
         ]);
         f.render_widget(Paragraph::new(line).block(Block::bordered().title(" Options ")), opts);
 
-        // Show the tail of the log that fits.
-        let h = log.height.saturating_sub(2) as usize;
-        let lines: Vec<Line> = self.log[self.log.len().saturating_sub(h)..]
+        // Show the tail of the log that fits, counting wrapped rows.
+        let (h, w) = (log.height.saturating_sub(2) as usize, log.width.saturating_sub(2).max(1) as usize);
+        let mut rows = 0;
+        let first = self
+            .log
             .iter()
-            .map(|s| Line::from(s.as_str()))
-            .collect();
+            .rposition(|s| {
+                rows += s.chars().count().div_ceil(w).max(1);
+                rows > h
+            })
+            .map_or(0, |i| i + 1);
+        let lines: Vec<Line> = self.log[first..].iter().map(|s| Line::from(s.as_str())).collect();
         let log_title = if self.ffmpeg { " Log " } else { " Log (ffmpeg missing!) " };
         f.render_widget(
             Paragraph::new(lines).wrap(Wrap { trim: false }).block(Block::bordered().title(log_title)),
