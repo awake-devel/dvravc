@@ -170,6 +170,53 @@ The next record starts right after the payload. If the bytes at the expected
 position are not a valid marker, the parser resynchronises on the next
 `01 e0`; a truncated final record is ignored.
 
+## Compatible devices
+
+The recorder that writes this format has **not been identified**. `dvravc`
+was built from a single 4-channel PAL recorder (CIF 352×288, about 3 fps per
+channel, recordings from 2015). `.avc` is a generic extension, so a matching
+extension alone doesn't mean `dvravc` will read the file.
+
+**Confirmed:** none yet.
+
+**Unverified candidates.** These vendors use `.avc` for exports, but no public
+source documents their internal layout, so they may be a different format:
+
+- **AVTECH** (EagleEyes / AVTECH Video Player). Users report `.avc` downloads
+  that only AVTECH's player opens
+  ([CCTVForum](https://www.cctvforum.com/topic/19628-avtech-674-how-to-convert-avc-file/)),
+  sometimes written as a `.avc` + `.grp` + `.idx` trio
+  ([VideoHelp](https://forum.videohelp.com/threads/368428-convert-avc-to-mp4)).
+  The `.grp` file is something this format doesn't have.
+- **IDIS** is linked to `.avc` exports by a converter site, which describes
+  them as raw H.264 with no header
+  ([convert.guru](https://convert.guru/avc-converter)). That doesn't match the
+  `VA` header described here.
+
+**How to recognise the format:**
+
+- Files come in pairs: `YYYYMMDDHHMMSS_<NAME>.avc` plus an `.idx` file with the
+  same base name. Records in the `.idx` are 0x24 bytes each.
+- The file starts with ASCII `VA`, and `CH1.Title=` … `CH4.Title=` lines
+  appear near the top.
+- Frame markers `ff 3d 01 e0` (video) and `ff bd 01 e0` (audio) follow.
+
+```sh
+hexdump -C recording.avc | head -n 20
+# 00000000  56 41 ...                    |VA..............|   <- "VA" magic
+# ...       43 48 31 2e 54 69 74 6c 65 3d |CH1.Title=......|   <- camera names
+# ...       ff 3d 01 e0 ...              |.=..............|   <- first video record
+```
+
+You can also run `dvravc info recording.avc`. It prints the header, channels
+and frame counts, or fails if the file isn't this format.
+
+**Have one of these recorders?** Please
+[open an issue](https://github.com/awake-devel/dvravc/issues/new) with the
+brand and model (from the label or the setup menu) and whether `dvravc`
+converted the files. Don't attach private footage. A hexdump of the first
+few hundred bytes is enough. Reports like these are how this list will grow.
+
 ## Limitations
 
 - **Frame rate is averaged.** Each channel is encoded at a constant rate
@@ -178,7 +225,8 @@ position are not a valid marker, the parser resynchronises on the next
 - **Tested with one DVR model only.** Other recorders using a similar `.avc`
   export may differ in header layout or record fields.
 - **Brand unknown.** The recorder that produces this format has not been
-  identified; the format notes above are inferred from sample files.
+  identified; the format notes above are inferred from sample files. See
+  [Compatible devices](#compatible-devices).
 
 ## License
 
